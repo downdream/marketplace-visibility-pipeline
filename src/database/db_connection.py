@@ -1,8 +1,9 @@
-import os
 from typing import Optional
 
 import psycopg2
 from psycopg2.extensions import connection as PgConnection
+
+from src.config import DB_HOST, DB_NAME, DB_PORT
 
 
 def get_db_connection(
@@ -13,9 +14,9 @@ def get_db_connection(
     port: Optional[str] = None,
 ) -> PgConnection:
     return psycopg2.connect(
-        dbname=dbname or os.getenv("DB_NAME", "postgres"),
-        user=user or os.getenv("DB_USER"),
-        password=password or os.getenv("DB_PASSWORD"),
-        host=host or os.getenv("DB_HOST", "localhost"),
-        port=port or os.getenv("DB_PORT", "5432"),
+        dbname=dbname or DB_NAME,
+        user=user,
+        password=password,
+        host=host or DB_HOST,
+        port=port or DB_PORT,
     )
