@@ -135,27 +135,112 @@ Stored data can then be queried again for:
 - future reporting and dashboards
 
 ---
+## G2G Offers Pipeline
+
+This project now includes a marketplace offers pipeline built around collecting public offer data from G2G, storing raw JSON snapshots in PostgreSQL, and transforming them into a structured table for analysis.
+
+### Current workflow
+1. Fetch paginated offer data from the marketplace API
+2. Store each offer as a raw JSON snapshot in `public.offers_raw`
+3. Extract selected fields into `public.offers_clean`
+4. Use the cleaned table for pricing, seller, and offer analysis
+
+### Database tables
+#### `offers_raw`
+Stores the original API response per offer.
+This keeps the full source data available for future parsing and schema changes.
+
+Main fields:
+- `snapshot_time`
+- `source`
+- `offer_id`
+- `raw_json`
+
+#### `offers_clean`
+Stores selected structured fields extracted from the raw data.
+
+Main fields:
+- `snapshot_time`
+- `source`
+- `offer_id`
+- `title`
+- `description`
+- `unit_price`
+- `converted_unit_price`
+- `display_currency`
+- `offer_currency`
+- `available_qty`
+- `reserved_qty`
+- `seller_id`
+- `username`
+- `seller_ranking`
+- `user_level`
+- `satisfaction_rate`
+- `total_rating`
+- `total_completed_orders`
+- `total_success_order`
+- `status`
+- `is_online`
+- `created_at`
+- `updated_at`
+
+### Why this was added
+I wanted to move from one-off API tests into a more reusable pipeline design:
+- raw collection first
+- cleaning as a separate step
+- analysis on top of structured data
+
+This makes the project easier to extend later for:
+- weekly snapshots
+- multiple games
+- price trend analysis
+- seller behavior analysis
+- dashboards or apps
+
+### Current status
+Working:
+- paginated API collection
+- PostgreSQL raw snapshot storage
+- cleaned table generation from raw JSON
+- local execution through VS Code and virtual environment
+
+Planned next steps:
+- add analysis queries and notebooks
+- support multiple games/categories
+- improve duplicate/snapshot handling
+- add visualizations and dashboard layer
 
 ## Project Structure
 
 ```text
 marketplace-visibility-pipeline/
 │
+├── .vscode/
+│   └── settings.json
+│
 ├── src/
+│   ├── config.py
+│   │
 │   ├── database/
+│   │   ├── __init__.py
 │   │   ├── db_connection.py
 │   │   ├── db_select.py
 │   │   ├── db_insert_visibility.py
 │   │   ├── db_insert_keywords.py
 │   │   ├── db_insert_orders.py
-│   │   └── db_insert_drt.py
+│   │   ├── db_insert_drt.py
+│   │   └── clean_g2g_offers.py
 │   │
 │   ├── platforms/
+│   │   ├── __init__.py
 │   │   ├── backmarket_va_weekly.py
 │   │   ├── backmarket_rank.py
-│   │   └── kaufland_va_weekly.py
+│   │   ├── kaufland_va_weekly.py
+│   │   ├── kaufland_open_orders.py
+│   │   └── g2g_offers_raw.py
 │   │
 │   └── utils/
+│       ├── __init__.py
 │       ├── file_operation.py
 │       └── excel_formula.py
 │
@@ -163,4 +248,9 @@ marketplace-visibility-pipeline/
 ├── sample_data/
 ├── .env.example
 ├── .gitignore
-└── README.md
+├── README.md
+├── requirements.txt
+├── run_clean_g2g_offers.py
+├── run_g2g_offers_raw.py
+├── test_db_connection.py
+└── test_db_read.py
