@@ -6,6 +6,7 @@ import psycopg2
 from psycopg2.extras import Json
 
 from src.config import DB_HOST, DB_NAME, DB_PASSWORD, DB_PORT, DB_USER
+from src.config_games import GAMES
 
 
 BASE_URL = "https://sls.g2g.com/offer/search"
@@ -28,16 +29,16 @@ def get_db_connection():
 
 def build_params(
     seo_term: str,
-    filter_attr: str,
+    sort: str,
     page: int,
     page_size: int = 48,
     currency: str = "EUR",
     country: str = "DE",
+    filter_attr: Optional[str] = None,
 ) -> Dict[str, Any]:
-    return {
+    params = {
         "seo_term": seo_term,
-        "sort": "lowest_price",
-        "filter_attr": filter_attr,
+        "sort": sort,
         "page": page,
         "page_size": page_size,
         "currency": currency,
@@ -46,9 +47,19 @@ def build_params(
         "v": "v2",
     }
 
+    if filter_attr:
+        params["filter_attr"] = filter_attr
 
-def fetch_offers_page(params: Dict[str, Any]) -> Dict[str, Any]:
+    return params
+
+
+def fetch_offers_page(params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     response = requests.get(BASE_URL, params=params, headers=HEADERS, timeout=30)
+
+    if response.status_code == 400:
+        print(f"Reached invalid page: {params.get('page')}. Stopping pagination.")
+        return None
+
     response.raise_for_status()
     return response.json()
 
@@ -67,10 +78,15 @@ def extract_total_results(response_json: Dict[str, Any]) -> Optional[int]:
     )
 
 
-def insert_raw_offers(conn, offers: List[Dict[str, Any]], source: str) -> None:
+def insert_raw_offers(
+    conn,
+    offers: List[Dict[str, Any]],
+    source: str,
+    game_name: str,
+    ) -> None:
     query = """
-        INSERT INTO public.offers_raw (source, offer_id, raw_json)
-        VALUES (%s, %s, %s)
+        INSERT INTO public.offers_raw (source, offer_id, raw_json, game_name, snapshot_date)
+        VALUES (%s, %s, %s, %s, CURRENT_DATE)
     """
     with conn.cursor() as cursor:
         for offer in offers:
@@ -80,6 +96,7 @@ def insert_raw_offers(conn, offers: List[Dict[str, Any]], source: str) -> None:
                     source,
                     offer.get("offer_id"),
                     Json(offer),
+                    game_name,
                 ),
             )
     conn.commit()
@@ -87,8 +104,10 @@ def insert_raw_offers(conn, offers: List[Dict[str, Any]], source: str) -> None:
 
 def fetch_and_store_all_pages(
     seo_term: str,
-    filter_attr: str,
+    sort: str,
+    filter_attr: Optional[str],
     source: str,
+    game_name: str,
     page_size: int = 48,
     currency: str = "EUR",
     country: str = "DE",
@@ -99,6 +118,7 @@ def fetch_and_store_all_pages(
     try:
         first_page_params = build_params(
             seo_term=seo_term,
+            sort=sort,
             filter_attr=filter_attr,
             page=1,
             page_size=page_size,
@@ -106,6 +126,10 @@ def fetch_and_store_all_pages(
             country=country,
         )
         first_page_json = fetch_offers_page(first_page_params)
+
+        if first_page_json is None:
+            print("First page returned no valid data.")
+            return total_inserted
 
         first_offers = extract_offers(first_page_json)
         total_results = extract_total_results(first_page_json)
@@ -116,10 +140,10 @@ def fetch_and_store_all_pages(
             print(f"Detected max pages: {max_pages}")
         else:
             max_pages = None
-            print("Could not detect total pages. Will stop on empty page.")
+            print("Could not detect total pages. Will stop on empty page or invalid page.")
 
         if first_offers:
-            insert_raw_offers(conn, first_offers, source=source)
+            insert_raw_offers(conn, first_offers, source=source, game_name=game_name)
             total_inserted += len(first_offers)
             print(f"Inserted {len(first_offers)} offers from page 1")
 
@@ -130,6 +154,7 @@ def fetch_and_store_all_pages(
 
             params = build_params(
                 seo_term=seo_term,
+                sort=sort,
                 filter_attr=filter_attr,
                 page=page,
                 page_size=page_size,
@@ -137,13 +162,18 @@ def fetch_and_store_all_pages(
                 country=country,
             )
             page_json = fetch_offers_page(params)
+
+            if page_json is None:
+                print(f"Stopping at page {page}.")
+                break
+
             offers = extract_offers(page_json)
 
             if not offers:
                 print(f"No offers on page {page}. Stopping.")
                 break
 
-            insert_raw_offers(conn, offers, source=source)
+            insert_raw_offers(conn, offers, source=source, game_name=game_name)
             total_inserted += len(offers)
             print(f"Inserted {len(offers)} offers from page {page}")
 
@@ -157,11 +187,15 @@ def fetch_and_store_all_pages(
 
 
 def main():
-    fetch_and_store_all_pages(
-        seo_term="dota-2-accounts-for-sale",
-        filter_attr="e9f95473:2db8f742,3fd2547d",
-        source="g2g_dota2_accounts",
-    )
+    for game in GAMES:
+        print(f"Running game: {game['name']}")
+        fetch_and_store_all_pages(
+            seo_term=game["seo_term"],
+            sort=game["sort"],
+            filter_attr=game["filter_attr"],
+            source=game["source"],
+            game_name=game["name"],
+        )
 
 
 if __name__ == "__main__":
